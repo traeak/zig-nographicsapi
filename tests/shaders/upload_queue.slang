@@ -1,0 +1,11 @@
+#include <NoGraphicsAPI/shader.slang>
+#include "upload_queue_shared.h"
+
+GPU_ROOT(UploadQueueRoot, root);
+
+[shader("compute")]
+[numthreads(upload_queue_thread_count, 1, 1)]
+void computeMain(uint3 thread : SV_DispatchThreadID)
+{
+    if (thread.x < root.count) root.destination[thread.x] += root.source[thread.x];
+}

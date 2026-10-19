@@ -1,0 +1,20 @@
+.{
+    .name = .zig_nographicsapi,
+    .version = "0.1.0",
+    .fingerprint = 0x73dbfe4024a2e50e, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.17.0",
+    .dependencies = .{
+        .comath = .{ .path = "deps/comath" },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "deps",
+        "include",
+        "src",
+        "tools",
+        "utility",
+        "LICENSE",
+        "THIRD_PARTY_NOTICES.md",
+    },
+}

@@ -1,0 +1,349 @@
+diff -ruN /tmp/comath-git/src/Tokenizer.zig deps/comath/src/Tokenizer.zig
+--- /tmp/comath-git/src/Tokenizer.zig	2026-10-12 15:31:39.252663161 -0600
++++ deps/comath/src/Tokenizer.zig	2026-10-12 16:58:00.128010479 -0600
+@@ -288,7 +288,7 @@
+ 
+     const len = haystack.len - start;
+ 
+-    var mask_bit_vec: @Vector(len, u1) = [_]u1{@intFromBool(true)} ** len;
++    var mask_bit_vec: @Vector(len, u1) = @splat(@as(u1, 1));
+     @setEvalBranchQuota(@min(std.math.maxInt(u32), (excluded.len + 1) * 100));
+     for (excluded) |ex| {
+         const ex_vec: @Vector(len, T) = @splat(ex);
+@@ -296,7 +296,7 @@
+         mask_bit_vec &= match_bits;
+     }
+ 
+-    const mask: std.meta.Int(.unsigned, len) = @bitCast(mask_bit_vec);
++    const mask: @Int(.unsigned, len) = @bitCast(mask_bit_vec);
+     const idx: comptime_int = @ctz(mask);
+     return if (idx != haystack.len) start + idx else null;
+ }
+diff -ruN /tmp/comath-git/src/compiled.zig deps/comath/src/compiled.zig
+--- /tmp/comath-git/src/compiled.zig	2026-10-12 15:31:39.252980488 -0600
++++ deps/comath/src/compiled.zig	2026-10-12 16:58:00.128059083 -0600
+@@ -149,15 +149,15 @@
+             const InputTag = input_tag: {
+                 const inputs_s_info = @typeInfo(Inputs).@"struct";
+ 
+-                var field_names: [inputs_s_info.fields.len][]const u8 = undefined;
+-                var field_values: [inputs_s_info.fields.len]u64 = undefined;
++                var field_names: [inputs_s_info.field_names.len][]const u8 = undefined;
++                var field_values: [inputs_s_info.field_names.len]u64 = undefined;
+                 for (
+-                    inputs_s_info.fields,
++                    inputs_s_info.field_names,
+                     &field_names,
+                     &field_values,
+                     0..,
+-                ) |field, *name, *value, i| {
+-                    name.* = field.name;
++                ) |old_name, *name, *value, i| {
++                    name.* = old_name;
+                     value.* = i;
+                 }
+ 
+@@ -172,7 +172,7 @@
+                 ) !Eval(@TypeOf(inputs)) {
+                     comptime switch (unused_mode) {
+                         .allow_unused => {},
+-                        .no_unused => if (@typeInfo(Inputs).@"struct".fields.len != 0) {
++                        .no_unused => if (@typeInfo(Inputs).@"struct".field_names.len != 0) {
+                             const EvalIdent = switch (@TypeOf(Ns.EvalIdent)) {
+                                 void => struct {
+                                     fn EvalIdentAlwaysNoreturn(comptime _: []const u8) type {
+@@ -420,8 +420,8 @@
+     comptime EvalIdent: fn (comptime []const u8) type,
+ ) ?[]const u8 {
+     comptime {
+-        var unused_set = std.EnumSet(InputTag).initFull();
+-        var shadow_set = std.EnumSet(InputTag).initEmpty();
++        var unused_set: std.EnumSet(InputTag) = .full;
++        var shadow_set: std.EnumSet(InputTag) = .empty;
+         var tokenizer: Tokenizer = .init;
+         @setEvalBranchQuota(expr_src.len * 100);
+         while (true) switch (tokenizer.next(expr_src)) {
+diff -ruN /tmp/comath-git/src/contexts/fn_method.zig deps/comath/src/contexts/fn_method.zig
+--- /tmp/comath-git/src/contexts/fn_method.zig	2026-10-12 15:31:39.253123302 -0600
++++ deps/comath/src/contexts/fn_method.zig	2026-10-12 16:58:00.127975643 -0600
+@@ -76,7 +76,7 @@
+                 const method_info = @typeInfo(Method).@"fn";
+                 if (method_info.return_type) |Ret| return util.GetPayloadIfErrorUnion(Ret);
+ 
+-                const val: (method_info.params[0].type orelse T) = undefined;
++                const val: (method_info.param_types[0] orelse T) = undefined;
+                 const field_arg = if (method_info.params[1].type) |FieldArg| castStringTo(FieldArg, field) else field;
+                 return util.GetPayloadIfErrorUnion(@TypeOf(@field(T, name)(val, field_arg)));
+             }
+@@ -100,8 +100,8 @@
+                 const method_info = @typeInfo(Method).@"fn";
+                 if (method_info.return_type) |Ret| return util.GetPayloadIfErrorUnion(Ret);
+ 
+-                const lhs: (method_info.params[0].type orelse Lhs) = undefined;
+-                const rhs: (method_info.params[0].type orelse Rhs) = undefined;
++                const lhs: (method_info.param_types[0] orelse Lhs) = undefined;
++                const rhs: (method_info.param_types[0] orelse Rhs) = undefined;
+                 return util.GetPayloadIfErrorUnion(@TypeOf(@field(Lhs, name)(lhs, rhs)));
+             }
+             return Ns.EvalIndexAccess(Lhs, Rhs);
+@@ -116,13 +116,13 @@
+ 
+         pub fn EvalFuncCall(comptime Callee: type, comptime Args: type) type {
+             const args_info = @typeInfo(Args).@"struct";
+-            if (getOpMapping(Callee, "evalFuncCall", method_names, 1 + args_info.fields.len)) |name| {
++            if (getOpMapping(Callee, "evalFuncCall", method_names, 1 + args_info.field_names.len)) |name| {
+                 const Method = util.ImplicitDeref(@TypeOf(@field(Callee, name)));
+                 const method_info = @typeInfo(Method).@"fn";
+                 if (method_info.return_type) |Ret| return util.GetPayloadIfErrorUnion(Ret);
+ 
+-                const lhs: (method_info.params[0].type orelse Callee) = undefined;
+-                const rhs: (method_info.params[0].type orelse Args) = undefined;
++                const lhs: (method_info.param_types[0] orelse Callee) = undefined;
++                const rhs: (method_info.param_types[0] orelse Args) = undefined;
+                 return util.GetPayloadIfErrorUnion(@TypeOf(@call(.auto, @field(Callee, name), .{lhs} ++ rhs)));
+             }
+             return Ns.EvalFuncCall(Callee, Args);
+@@ -131,9 +131,9 @@
+             const Callee = @TypeOf(callee);
+             const Args = @TypeOf(args);
+             const args_info = @typeInfo(Args).@"struct";
+-            if (getOpMapping(Callee, "evalFuncCall", method_names, 1 + args_info.fields.len)) |name| {
++            if (getOpMapping(Callee, "evalFuncCall", method_names, 1 + args_info.field_names.len)) |name| {
+                 const func = @field(Callee, name);
+-                return switch (comptime args_info.fields.len) {
++                return switch (comptime args_info.field_names.len) {
+                     0 => @call(.auto, func, .{callee}),
+                     1 => @call(.auto, func, .{ callee, args[0] }),
+                     2 => @call(.auto, func, .{ callee, args[0], args[1] }),
+@@ -168,7 +168,7 @@
+                 const method_info = @typeInfo(Method).@"fn";
+                 if (method_info.return_type) |Ret| return util.GetPayloadIfErrorUnion(Ret);
+ 
+-                const val: (method_info.params[0].type orelse T) = undefined;
++                const val: (method_info.param_types[0] orelse T) = undefined;
+                 return util.GetPayloadIfErrorUnion(@TypeOf(@field(T, name)(val)));
+             }
+             return Ns.EvalUnOp(op, T);
+@@ -187,7 +187,7 @@
+                 const method_info = @typeInfo(Method).@"fn";
+                 if (method_info.return_type) |Ret| return util.GetPayloadIfErrorUnion(Ret);
+ 
+-                const lhs: (method_info.params[0].type orelse Lhs) = undefined;
++                const lhs: (method_info.param_types[0] orelse Lhs) = undefined;
+                 const rhs: (method_info.params[1].type orelse Rhs) = undefined;
+                 return util.GetPayloadIfErrorUnion(@TypeOf(@field(Lhs, name)(lhs, rhs)));
+             }
+@@ -263,7 +263,7 @@
+         const result = for (entry_list, 0..) |name, i| {
+             if (!@hasDecl(T, name)) continue;
+             const Fn = util.ImplicitDeref(@TypeOf(@field(T, name)));
+-            if (@typeInfo(Fn).@"fn".params.len != arity) continue;
++            if (@typeInfo(Fn).@"fn".param_types.len != arity) continue;
+             idx = i + 1;
+             break name;
+         } else null;
+@@ -271,7 +271,7 @@
+         for (entry_list[idx..]) |next_name| {
+             if (!@hasDecl(T, next_name)) continue;
+             const NextFn = util.ImplicitDeref(@TypeOf(@field(T, next_name)));
+-            if (@typeInfo(NextFn).@"fn".params.len != arity) continue;
++            if (@typeInfo(NextFn).@"fn".param_types.len != arity) continue;
+             @compileError("Ambiguous resolution between method '" ++ result.? ++ "' and '" ++ next_name ++ "'");
+         }
+ 
+@@ -282,10 +282,22 @@
+ fn DedupedMethodNames(comptime method_names: anytype) type {
+     const info = @typeInfo(@TypeOf(method_names)).@"struct";
+ 
+-    @setEvalBranchQuota(1000 + info.fields.len * 10);
+-    var fields: [info.fields.len]std.builtin.Type.StructField = undefined;
+-    for (&fields, info.fields) |*new, old| {
+-        const T = switch (@typeInfo(old.type)) {
++    const FieldAttrs = std.lang.Type.Struct.FieldAttributes;
++
++    @setEvalBranchQuota(1000 + info.field_names.len * 10);
++    var names: [info.field_names.len][]const u8 = undefined;
++    var types: [info.field_names.len]type = undefined;
++    var attrs: [info.field_names.len]FieldAttrs = undefined;
++
++    for (
++        info.field_names,
++        info.field_types,
++        info.field_attrs,
++        &names,
++        &types,
++        &attrs,
++    ) |old_name, OldT, old_attr, *name, *T, *attr| {
++        const NewT = switch (@typeInfo(OldT)) {
+             .pointer => |pointer| switch (@typeInfo(pointer.child)) {
+                 .int, .comptime_int => []const u8,
+                 .array => |array| switch (@typeInfo(array.child)) {
+@@ -294,34 +306,18 @@
+                 },
+                 else => []const []const u8,
+             },
+-            else => @compileError("Unexpected type " ++ @typeName(old.type)),
+-        };
+-        const old_value: T = @as(*align(1) const old.type, @ptrCast(old.default_value_ptr)).*;
+-        new.* = .{
+-            .name = old.name,
+-            .type = T,
+-            .is_comptime = true,
+-            .default_value_ptr = @ptrCast(&old_value),
+-            .alignment = @alignOf(T),
++            else => @compileError("Unexpected type " ++ @typeName(OldT)),
+         };
+-    }
+-
+-    const deduped_fields = util.dedupeScalarSlice(std.builtin.Type.StructField, fields);
+-    return DedupedMethodNamesImpl(deduped_fields);
+-}
+-fn DedupedMethodNamesImpl(comptime fields: []const std.builtin.Type.StructField) type {
+-    var names: [fields.len][]const u8 = undefined;
+-    var types: [fields.len]type = undefined;
+-    var attrs: [fields.len]std.builtin.Type.StructField.Attributes = undefined;
+-    for (fields, &names, &types, &attrs) |field, *name, *T, *attr| {
+-        name.* = field.name;
+-        T.* = field.type;
++        const old_value: NewT = old_attr.defaultValue(OldT).?;
++        name.* = old_name;
++        T.* = NewT;
+         attr.* = .{
+-            .@"comptime" = field.is_comptime,
++            .@"comptime" = true,
+             .@"align" = null,
+-            .default_value_ptr = field.default_value_ptr,
++            .default_value_ptr = @ptrCast(&old_value),
+         };
+     }
++
+     return @Struct(.auto, null, &names, &types, &attrs);
+ }
+ 
+@@ -330,24 +326,24 @@
+         _,
+ 
+         pub inline fn from(value: anytype) @This() {
+-            return @enumFromInt(value);
++            return @fromBackingInt(@intCast(value));
+         }
+ 
+         pub inline fn add(self: @This(), other: @This()) @This() {
+-            return @enumFromInt(@intFromEnum(self) + @intFromEnum(other));
++            return @fromBackingInt(@intCast(@backingInt(self) + @backingInt(other)));
+         }
+         pub inline fn sub(self: @This(), other: @This()) @This() {
+-            return @enumFromInt(@intFromEnum(self) - @intFromEnum(other));
++            return @fromBackingInt(@intCast(@backingInt(self) - @backingInt(other)));
+         }
+         pub inline fn neg(self: @This()) @This() {
+-            return @enumFromInt(-@intFromEnum(self));
++            return @fromBackingInt(@intCast(-@backingInt(self)));
+         }
+         pub inline fn mul(self: @This(), other: anytype) @This() {
+-            return @enumFromInt(@intFromEnum(self) * switch (@TypeOf(other)) {
+-                @This() => @intFromEnum(other),
++            return @fromBackingInt(@intCast(@backingInt(self) * switch (@TypeOf(other)) {
++                @This() => @backingInt(other),
+                 comptime_int => other,
+                 else => |Other| @compileError("Unexpected type " ++ @typeName(Other)),
+-            });
++            }));
+         }
+     };
+ 
+@@ -358,13 +354,13 @@
+         .evalFuncCall = "mul",
+     });
+     try std.testing.expectEqual(CustomNum.from(2), cm.eval("a + -b - c", fm_ctx, .{
+-        .a = @as(CustomNum, @enumFromInt(22)),
+-        .b = @as(CustomNum, @enumFromInt(9)),
+-        .c = @as(CustomNum, @enumFromInt(11)),
++        .a = @as(CustomNum, @fromBackingInt(@intCast(22))),
++        .b = @as(CustomNum, @fromBackingInt(@intCast(9))),
++        .c = @as(CustomNum, @fromBackingInt(@intCast(11))),
+     }));
+     try std.testing.expectEqual(CustomNum.from(77), cm.eval("a(b) * 1", fm_ctx, .{
+-        .a = @as(CustomNum, @enumFromInt(11)),
+-        .b = @as(CustomNum, @enumFromInt(7)),
++        .a = @as(CustomNum, @fromBackingInt(@intCast(11))),
++        .b = @as(CustomNum, @fromBackingInt(@intCast(7))),
+     }));
+     try std.testing.expectEqual(CustomNum.from(62), cm.eval("num(31)(2)", fm_ctx, .{
+         .num = CustomNum.from,
+diff -ruN /tmp/comath-git/src/contexts/simple.zig deps/comath/src/contexts/simple.zig
+--- /tmp/comath-git/src/contexts/simple.zig	2026-10-12 15:31:39.253123302 -0600
++++ deps/comath/src/contexts/simple.zig	2026-10-12 16:58:00.127944513 -0600
+@@ -120,7 +120,7 @@
+                 if (T == noreturn) break :blk;
+                 return T;
+             }
+-            return switch (@typeInfo(Rhs).@"struct".fields.len) {
++            return switch (@typeInfo(Rhs).@"struct".field_names.len) {
+                 0 => Lhs,
+                 1 => std.meta.Elem(Lhs),
+                 else => |n| [n]std.meta.Elem(Lhs),
+@@ -134,7 +134,7 @@
+                 if (T == noreturn) break :blk;
+                 return ctx.sub_ctx.evalIndexAccess(lhs, rhs);
+             }
+-            return switch (@typeInfo(@TypeOf(rhs)).@"struct".fields.len) {
++            return switch (@typeInfo(@TypeOf(rhs)).@"struct".field_names.len) {
+                 0 => lhs,
+                 1 => lhs[rhs[0]],
+                 else => @shuffle(
+diff -ruN /tmp/comath-git/src/contexts.zig deps/comath/src/contexts.zig
+--- /tmp/comath-git/src/contexts.zig	2026-10-12 15:31:39.252980488 -0600
++++ deps/comath/src/contexts.zig	2026-10-12 16:58:00.128087767 -0600
+@@ -33,8 +33,8 @@
+                     'a'...'f' => digit - 'a' + 10,
+                     else => @compileError("Invalid integer literal '" ++ src ++ "'"),
+                 };
+-                if (val >= @intFromEnum(base)) @compileError("Invalid integer literal '" ++ src ++ "'");
+-                x *= @intFromEnum(base);
++                if (val >= @backingInt(base)) @compileError("Invalid integer literal '" ++ src ++ "'");
++                x *= @backingInt(base);
+                 x += val;
+             }
+             break :blk x;
+diff -ruN /tmp/comath-git/src/eval.zig deps/comath/src/eval.zig
+--- /tmp/comath-git/src/eval.zig	2026-10-12 15:31:39.253123302 -0600
++++ deps/comath/src/eval.zig	2026-10-12 16:58:00.128175546 -0600
+@@ -73,21 +73,21 @@
+         }
+ 
+         pub fn EvalIndexAccess(comptime Lhs: type, comptime Rhs: type) type {
+-            return switch (@typeInfo(Rhs).@"struct".fields.len) {
++            return switch (@typeInfo(Rhs).@"struct".field_names.len) {
+                 0 => Lhs,
+                 1 => std.meta.Elem(Lhs),
+                 else => |n| [n]std.meta.Elem(Lhs),
+             };
+         }
+         pub fn evalIndexAccess(_: @This(), lhs: anytype, rhs: anytype) !EvalIndexAccess(@TypeOf(lhs), @TypeOf(rhs)) {
+-            return switch (@typeInfo(@TypeOf(rhs)).@"struct".fields.len) {
++            return switch (@typeInfo(@TypeOf(rhs)).@"struct".field_names.len) {
+                 0 => lhs,
+                 1 => lhs[rhs[0]],
+                 else => @shuffle(
+                     std.meta.Elem(@TypeOf(lhs)),
+                     lhs[0..].*,
+                     undefined,
+-                    @as([@typeInfo(@TypeOf(rhs)).@"struct".fields.len]comptime_int, rhs),
++                    @as([@typeInfo(@TypeOf(rhs)).@"struct".field_names.len]comptime_int, rhs),
+                 ),
+             };
+         }
+@@ -111,10 +111,10 @@
+             const MethodType = @TypeOf(@field(SelfNs, method));
+ 
+             if (@typeInfo(MethodType) != .@"fn") return noreturn;
+-            const params = @typeInfo(MethodType).@"fn".params;
++            const params = @typeInfo(MethodType).@"fn".param_types;
+ 
+             if (params.len == 0) return noreturn;
+-            const Expected = util.ImplicitDeref(params[0].type orelse *const SelfParam);
++            const Expected = util.ImplicitDeref(params[0] orelse *const SelfParam);
+ 
+             if (SelfNs != Expected) return noreturn;
+             return @typeInfo(MethodType).@"fn".return_type.?;
